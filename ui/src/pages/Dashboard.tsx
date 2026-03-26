@@ -93,10 +93,8 @@ export function Dashboard() {
     enabled: !!selectedCompanyId,
   });
 
-  const companyForControls =
-    selectedCompany ?? (selectedCompanyId ? companies.find((c) => c.id === selectedCompanyId) ?? null : null);
   const showEmergencyControls =
-    !!companyForControls && companyForControls.status !== "archived";
+    !!selectedCompany && selectedCompany.status !== "archived";
 
   function invalidateAfterCompanyEmergency(companyId: string) {
     queryClient.invalidateQueries({ queryKey: queryKeys.companies.all });
@@ -111,6 +109,7 @@ export function Dashboard() {
   const companyStatusMutation = useMutation({
     mutationFn: ({ companyId, status }: { companyId: string; status: "active" | "paused" }) =>
       companiesApi.update(companyId, { status }),
+    onMutate: () => setToggleError(null),
     onSuccess: (_data, { companyId }) => {
       setToggleError(null);
       invalidateAfterCompanyEmergency(companyId);
@@ -122,6 +121,7 @@ export function Dashboard() {
   });
 
   const hardStopMutation = useMutation({
+    onMutate: () => setToggleError(null),
     mutationFn: async (companyId: string) => {
       const live = await heartbeatsApi.liveRunsForCompany(companyId);
       const active = live.filter((r) => r.status === "queued" || r.status === "running");
@@ -162,6 +162,8 @@ export function Dashboard() {
     seenActivityIdsRef.current = new Set();
     hydratedActivityRef.current = false;
     setAnimatedActivityIds(new Set());
+    setToggleError(null);
+    setConfirmAction(null);
   }, [selectedCompanyId]);
 
   useEffect(() => {
@@ -259,11 +261,13 @@ export function Dashboard() {
   return (
     <div className="space-y-6">
       {error && <p className="text-sm text-destructive">{error.message}</p>}
-      {toggleError && <p className="text-sm text-destructive">{toggleError}</p>}
+      {toggleError && confirmAction === null && (
+        <p className="text-sm text-destructive">{toggleError}</p>
+      )}
 
-      {showEmergencyControls && companyForControls && (
+      {showEmergencyControls && selectedCompany && (
         <>
-          {companyForControls.status === "paused" && (
+          {selectedCompany.status === "paused" && (
             <div className="flex flex-wrap items-start gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 dark:border-amber-500/25 dark:bg-amber-950/50">
               <PauseCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
               <div className="min-w-0 flex-1">
@@ -280,13 +284,13 @@ export function Dashboard() {
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div className="min-w-0 max-w-xl">
               <p className="text-xs text-muted-foreground">
-                {companyForControls.status === "paused"
+                {selectedCompany.status === "paused"
                   ? "Resume to allow new heartbeats and automation for this company."
                   : "Pause blocks new agent work for this company. Hard stop cancels queued or running runs, then pauses (only while the company is active)."}
               </p>
             </div>
             <div className="flex shrink-0 flex-wrap gap-2">
-              {companyForControls.status === "paused" ? (
+              {selectedCompany.status === "paused" ? (
                 <Button
                   type="button"
                   variant="outline"
@@ -324,7 +328,7 @@ export function Dashboard() {
                       setConfirmAction("hardStop");
                     }}
                     disabled={
-                      companyForControls.status !== "active" ||
+                      selectedCompany.status !== "active" ||
                       companyStatusMutation.isPending ||
                       hardStopMutation.isPending
                     }
@@ -340,7 +344,10 @@ export function Dashboard() {
           <Dialog
             open={confirmAction !== null}
             onOpenChange={(open) => {
-              if (!open) setConfirmAction(null);
+              if (!open) {
+                setConfirmAction(null);
+                setToggleError(null);
+              }
             }}
           >
             <DialogContent showCloseButton>
@@ -350,18 +357,34 @@ export function Dashboard() {
                     ? "Hard stop this company?"
                     : confirmAction === "pause"
                       ? "Pause this company?"
-                      : "Resume this company?"}
+                      : confirmAction === "resume"
+                        ? "Resume this company?"
+                        : null}
                 </DialogTitle>
                 <DialogDescription>
                   {confirmAction === "hardStop"
                     ? "This will cancel all queued and running heartbeat runs for this company, then pause the company so new work cannot start. This applies to this company only, not the whole instance."
                     : confirmAction === "pause"
                       ? "New agent work will be blocked for this company only. Active runs can continue to completion."
-                      : "New heartbeats and automation can start again for this company."}
+                      : confirmAction === "resume"
+                        ? "New heartbeats and automation can start again for this company."
+                        : null}
                 </DialogDescription>
               </DialogHeader>
+              {toggleError ? (
+                <p className="text-sm text-destructive" role="alert">
+                  {toggleError}
+                </p>
+              ) : null}
               <DialogFooter>
-                <Button type="button" variant="outline" onClick={() => setConfirmAction(null)}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setConfirmAction(null);
+                    setToggleError(null);
+                  }}
+                >
                   Cancel
                 </Button>
                 <Button
@@ -392,7 +415,9 @@ export function Dashboard() {
                       ? "Working…"
                       : confirmAction === "pause"
                         ? "Pause"
-                        : "Resume"}
+                        : confirmAction === "resume"
+                          ? "Resume"
+                          : null}
                 </Button>
               </DialogFooter>
             </DialogContent>
